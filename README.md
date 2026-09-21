@@ -1,164 +1,142 @@
 # hermes-plugin-firefox-bookmarks
 
-Plugin per [Hermes Agent](https://hermes-agent.nousresearch.com) che legge, cerca e analizza i **preferiti di Firefox** — dal cloud di **Firefox Sync** (Sync 1.5, end-to-end encrypted) o da un profilo locale (`places.sqlite`), senza Firefox installato sulla macchina. **v1 read-only**: non modifica i preferiti sul server.
+Plugin for [Hermes Agent](https://hermes-agent.nousresearch.com) that reads, searches and analyzes your **Firefox bookmarks** — from the **Firefox Sync** cloud (Sync 1.5, end-to-end encrypted) or from a local profile (`places.sqlite`), with no Firefox installed on the machine. **v1 is read-only**: it never modifies bookmarks on the server.
 
 ```
-Hermes Agent ──(tool / skill / comandi)── firefox-bookmarks
+Hermes Agent ──(tool / skill / commands)── firefox-bookmarks
                                             │
                         ┌───────────────────┴──────────────┐
-                        │ cache SQLite + FTS5 (locale)     │  ← cache-first:
-                        └───────────────────┬──────────────┘    ogni query è offline
+                        │ SQLite + FTS5 cache (local)      │  ← cache-first:
+                        └───────────────────┬──────────────┘    every query is offline
                             sync on-demand  │
                    ┌────────────────────────┴─────────────────┐
                    │ Firefox Sync 1.5 (FxA + HAWK)            │
-                   │ o places.sqlite (modalità local)         │
+                   │ or places.sqlite (local mode)            │
                    └──────────────────────────────────────────┘
 ```
 
-## Caratteristiche
+## Features
 
-- **Sync**: login Firefox Account (con 2FA/TOTP), HAWK, HKDF-SHA256, AES-256-CBC+HMAC sui BSO — implementato in Python puro (`ffsync/`, zero dipendenze da Hermes)
-- **Search**: FTS5 su titoli/URL/tag/struttura cartelle + filtri dominio, cartella, tag, periodo; query naturali ("mi avevo salvato qualcosa su systemd?")
-- **Analyse deterministiche** (no LLM): conteggi, distribuzione per dominio, duplicati, link orfani (URL senza title)
-- **Link check** opt-in: HEAD concorrente (4 thread), timeout, politeness; mai automatico
-- **Modalità local**: legge `places.sqlite` in sola copia (zero rischio sul profilo)
-- **Skill** `firefox-bookmarks` con regole operative (query corte, consenso per link-check)
+- **Sync**: Firefox Account login (with 2FA/TOTP), HAWK, HKDF-SHA256, AES-256-CBC+HMAC on BSOs — implemented in pure Python (`ffsync/`, zero Hermes dependencies)
+- **Search**: FTS5 over titles/URLs/tags/folder structure + domain, folder, tag and time-range filters; natural queries ("did I save something about systemd?")
+- **Deterministic analysis** (no LLM): counts, per-domain distribution, duplicates, orphan links (URLs without a title)
+- **Opt-in link check**: concurrent HEAD (4 threads), timeout, politeness; never automatic
+- **Local mode**: reads `places.sqlite` from a copy only (zero risk to the profile)
+- **Skill** `firefox-bookmarks` with operating rules (short queries, consent for link-check)
 
-## Requisiti
+## Requirements
 
-- Hermes Agent recente con sistema plugin (user dir: `~/.hermes/plugins/` o `$HERMES_HOME/plugins/`)
-- Python 3.10+ nel venv Hermes (già incluso in installazioni standard)
-- Runtime: `httpx` + `cryptography` (già nel venv Hermes); dev: `pytest`
+- A recent Hermes Agent with the plugin system (user dir: `~/.hermes/plugins/` or `$HERMES_HOME/plugins/`)
+- Python 3.10+ in the Hermes venv (already included in standard installs)
+- Runtime: `httpx` + `cryptography` (already in the Hermes venv); dev: `pytest`
 
-## Installazione
+## Installation
 
 ```bash
-git clone <URL-repo> ~/.hermes/plugins/firefox-bookmarks
-# oppure: unzip in ~/.hermes/plugins/
+git clone <repo-url> ~/.hermes/plugins/firefox-bookmarks
+# or: unzip into ~/.hermes/plugins/
 ```
 
-Attiva il plugin (il gateway rileva i user plugin in `plugins/`):
+Activate the plugin (the gateway detects user plugins in `plugins/`):
 
 ```bash
-hermes plugins list          # verifica che firefox-bookmarks compaia
+hermes plugins list          # verify that firefox-bookmarks appears
 hermes plugins doctor firefox-bookmarks
 ```
 
-Il plugin richiede **0 capability privilegiate** e **non sovrascrive tool built-in**.
+The plugin requires **0 privileged capabilities** and **does not override built-in tools**.
 
-## Prima configurazione (una tantum)
+## First-time setup
 
-Le credenziali **non passano mai da Telegram/LLM** (la password va solo nel login FxA; il refresh token resta su disco con permessi `600`).
+Credentials **never pass through Telegram/LLM** (the password is used only in the FxA login; the refresh token stays on disk with `600` permissions).
 
-**Piano A — Firefox Sync (richiede un Firefox Account con Sync attivo):**
+**Plan A — Firefox Sync (requires a Firefox Account with Sync active):**
 
 ```bash
 cd ~/.hermes/plugins/firefox-bookmarks
-python -m ffsync.probe setup          # password da terminale (getpass, non visibile)
-python -m ffsync.probe sync           # primo sync + verifica
-python -m ffsync.probe status         # stato credenziali + cache
+python -m ffsync.probe setup          # password from the terminal (getpass, never shown)
+python -m ffsync.probe sync           # first sync + verification
+python -m ffsync.probe status         # credentials + cache status
 ```
 
-**Piano B — profilo locale (senza account):**
+**Plan B — local profile (no account):**
 
 ```bash
-python -m ffsync.probe local ~/.mozilla/firefox/<profile>/  # o path a places.sqlite
+python -m ffsync.probe local ~/.mozilla/firefox/<profile>/  # or a path to places.sqlite
 ```
 
-## Uso
+## Usage
 
-Dopo il primo sync (o con il piano B), tutto funziona in chat:
+After the first sync (or with plan B), everything works from chat:
 
-- «Cosa ho salvato su systemd?» → `firefox_bookmarks_search`
-- «Quanti bookmark ho e dove sono di più?» → `firefox_bookmarks_analyze`
-- «Mostrami la struttura delle cartelle» → `firefox_bookmarks_tree`
-- «Controlla se i link di una cartella sono morti» → `firefox_bookmarks_recheck` (richiede consenso)
-- Comandi: `/bookmarks-sync` (refresh immediato), `/bookmarks-report` (overview + domini + duplicati)
+- "What did I save about systemd?" → `firefox_bookmarks_search`
+- "How many bookmarks do I have, and where are most of them?" → `firefox_bookmarks_analyze`
+- "Show me the folder structure" → `firefox_bookmarks_tree`
+- "Check whether the links in a folder are dead" → `firefox_bookmarks_recheck` (requires consent)
+- Commands: `/bookmarks-sync` (immediate refresh), `/bookmarks-report` (overview + domains + duplicates)
 
-## Sincronizzazione: ogni quanto?
+## Synchronization: how often?
 
-**Non esiste una cadenza fissa nel plugin: il sync è on-demand** (tool `firefox_bookmarks_sync`) o **schedulabile** con un job Hermes.
+**The plugin has no fixed cadence: sync is on-demand** (tool `firefox_bookmarks_sync`) or **schedulable** with a Hermes job.
 
-Comportamento concreto v1:
+Concrete v1 behavior:
 
-- `firefox_bookmarks_search`/`analyze`/`tree` **non** innescano mai il sync: leggono la cache locale. Se i dati hanno >7 giorni la risposta include `hint: consider sync`.
-- Il sync non è incrementale in v1 (full-list di `bookmarks`): è leggerissimo (<1000 record) ma resta meglio non eseguirlo a ogni query.
+- `firefox_bookmarks_search`/`analyze`/`tree` **never** trigger a sync: they read the local cache. If the data is older than 7 days, the response includes `hint: consider sync`.
+- Sync is not incremental in v1 (full list of `bookmarks`): it is very light (<1000 records), but it is still better not to run it on every query.
 
-Cadence consigliate:
+Recommended cadences:
 
-| Esigenza | Setup |
+| Need | Setup |
 |---|---|
-| «sempre aggiornati» | job ogni **30 minuti** (vedi sotto) |
-| uso quotidiano | job **ogni notte** (es. 03:00) — è l'esempio del piano di sviluppo |
-| occasionale | solo on-demand (`/bookmarks-sync`) |
+| "always up to date" | job every **30 minutes** (see below) |
+| daily use | job **every night** (e.g. 03:00) — the example from the development plan |
+| occasional | on-demand only (`/bookmarks-sync`) |
 
-Esempio di job (linguaggio naturale, Hermes crea il cron job):
-
-```
-ogni 30 minuti, se la cache dei bookmarks è vuota o ha più di 30 minuti,
-esegui firefox_bookmarks_sync e non rispondere se tutto è ok
-```
-
-Nota: ogni sync consuma quota FxA (i rate limit di Sync sono per-collection; la
-paginazione gestisce i 429 con backoff). Un job ogni 30 minuti è ragionevole;
-ogni 5 minuti no.
-
-## Struttura
+Example job (natural language; Hermes creates the cron job):
 
 ```
-firefox-bookmarks/
-├── plugin.yaml                  # manifest Hermes
-├── __init__.py                  # register(ctx) — tool/skill/comandi
-├── tools.py                     # JSON Schema + handler dei 5 tool
-├── cache.py                     # cache SQLite + FTS5 (schema §8 del piano)
-├── analysis.py                  # stats deterministiche
-├── linkcheck.py                 # verifica link morti (opt-in)
-├── ffsync/                      # libreria Firefox Sync, zero dipendenze Hermes
-│   ├── crypto.py                # PBKDF2/HKDF/AES-CBC/HMAC
-│   ├── auth.py                  # login FxA + 2FA + credenziali su disco
-│   ├── storage.py               # REST Sync 1.5 (HAWK, paging)
-│   ├── bookmarks.py             # parser record → dataclass + albero cartelle
-│   ├── local.py                 # modalità B: places.sqlite
-│   └── probe.py                 # CLI setup/status/sync/local
-├── skill/firefox-bookmarks/SKILL.md
-├── tests/test_plugin.py         # 13 test offline
-├── README.md · CHANGELOG.md · LICENSE (MIT)
+every 30 minutes, if the bookmark cache is empty or older than 30 minutes,
+run firefox_bookmarks_sync and do not reply if everything is fine
 ```
 
-## Test
+Note: every sync consumes FxA quota (Sync rate limits are per-collection;
+pagination handles 429s with backoff). A job every 30 minutes is reasonable;
+every 5 minutes is not.
+
+## Testing
 
 ```bash
 cd firefox-bookmarks
-python -m pytest tests -q      # 13 test offline (crypto, HAWK, parser, cache, handler)
+python -m pytest tests -q      # 13 offline tests (crypto, HAWK, parser, cache, handler)
 ```
 
 ## Troubleshooting
 
-| Sintomo | Causa / rimedio |
+| Symptom | Cause / fix |
 |---|---|
-| `NOT_CONFIGURED` | Esegui `python -m ffsync.probe setup` |
-| `SESSION_EXPIRED` | Il refresh token è scaduto: `probe setup` di nuovo |
-| `ACCOUNT_LOCKED` | Mozilla ha bloccato dopo troppi tentativi: attendi e riprova |
-| `NEEDS_VERIFICATION` | L'account FxA non ha completato la verifica email: completa su accounts.firefox.com |
-| `STORAGE_ERROR 429` | Rate limit Sync: già gestito con backoff; evita sync ravvicinati |
-| La cache sembra ferma | Controlla `stats.last_sync` (epoch) e lancia `/bookmarks-sync` |
+| `NOT_CONFIGURED` | Run `python -m ffsync.probe setup` |
+| `SESSION_EXPIRED` | The refresh token expired: run `probe setup` again |
+| `ACCOUNT_LOCKED` | Mozilla locked the account after too many attempts: wait and retry |
+| `NEEDS_VERIFICATION` | The FxA account has not completed email verification: finish it on accounts.firefox.com |
+| `STORAGE_ERROR 429` | Sync rate limit: already handled with backoff; avoid back-to-back syncs |
+| The cache looks stale | Check `stats.last_sync` (epoch) and run `/bookmarks-sync` |
 
-## Sicurezza
+## Security
 
-- **Read-only v1**: nessuna scrittura verso il server Sync.
-- La password non viene salvata: solo `refreshToken` + `keyFetchToken` (su disco, `600`).
-- Le credenziali non transitano mai nei log, nelle risposte dei tool o nei job schedulati.
-- Link-check: mai automatico; richiede richiesta esplicita (vedi skill).
-- Dati: i preferiti restano end-to-end encrypted su Firefox Sync; la cache locale è in chiaro su disco — se condividi la macchina, proteggi la cartella `plugin-data/`.
+- **Read-only v1**: no writes toward the Sync server.
+- The password is never stored: only `refreshToken` + `keyFetchToken` (on disk, `600`).
+- Credentials never transit through logs, tool responses, or scheduled jobs.
+- Link-check: never automatic; requires an explicit request (see the skill).
+- Data: bookmarks stay end-to-end encrypted on Firefox Sync; the local cache is in plaintext on disk — if you share the machine, protect the `plugin-data/` folder.
 
-## Licenza
+## License
 
-MIT — vedi [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
 
-## Stato e next steps (dopo v1)
+## Status and next steps (after v1)
 
-- [ ] Sync incrementale (solo BSO `modifiedAfter` recenti)
-- [ ] Fix di chiavi vecchie (chiavi "oldsync" 2012–2017)
-- [ ] Categorizzazione tematica con LLM (batches, risultati in cache)
-- [ ] Link-check schedulato + report settimanale
-- [ ] Porting a MCP server per altri agenti
+- [ ] Incremental sync (only recent BSOs via `modifiedAfter`)
+- [ ] Fix for old keys ("oldsync" 2012–2017 keys)
+- [ ] Thematic categorization with LLM (batches, results cached)
+- [ ] Scheduled link-check + weekly report
+- [ ] Port to an MCP server for other agents

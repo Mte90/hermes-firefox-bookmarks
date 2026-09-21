@@ -46,12 +46,12 @@ def register(ctx) -> None:
     ctx.register_command(
         "bookmarks-sync",
         cmd_bookmarks_sync,
-        description="Sincronizza i preferiti Firefox nella cache locale (force per forzarla)",
+        description="Sync Firefox bookmarks into the local cache (pass force to force a refresh)",
         args_hint="[force]",
     )
     ctx.register_command(
         "bookmarks-report",
         cmd_bookmarks_report,
-        description="Report di analisi dei preferiti (overview/domini/duplicati)",
+        description="Bookmarks analysis report (overview/domains/duplicates)",
         args_hint="[categorize] [links]",
     )

@@ -2,18 +2,18 @@
 name: firefox-bookmarks
 description: >
   Search, sync and analyze the user's Firefox bookmarks (local cache).
-  Use when the user asks about their saved links/bookmarks/preferiti, wants
+  Use when the user asks about their saved links/bookmarks, wants
   a bookmarks report, or asks to refresh the bookmark cache.
 ---
 
 # Firefox bookmarks (read-only)
 
 ## When to use
-- The user asks about links they saved: "mi avevo salvato qualcosa su X?",
-  "trova il link di Y nei miei preferiti".
+- The user asks about links they saved: "did I save anything about X?",
+  "find the link to Y in my bookmarks".
 - The user wants an overview/report of the collection (count, domains,
   duplicates, categories, dead links).
-- The user asks to refresh the bookmark cache ("sincronizza i preferiti").
+- The user asks to refresh the bookmark cache ("sync my bookmarks").
 
 ## Operating rules
 - ALWAYS check `last_sync` in tool responses. If the cache is empty, run
@@ -22,7 +22,7 @@ description: >
   propose a sync before answering.
 - `firefox_bookmarks_search`: use SHORT topical queries (1-3 keywords),
   never full sentences. Combine `domain`/`folder`/`tag` filters to narrow.
-- For "organize/riorganizza" requests: run `firefox_bookmarks_tree` first to
+- For "organize" requests: run `firefox_bookmarks_tree` first to
   understand the structure, then `firefox_bookmarks_analyze` with categories.
   NEVER claim to have modified anything — v1 is read-only.
 - `firefox_bookmarks_analyze`:
