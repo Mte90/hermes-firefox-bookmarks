@@ -1,0 +1,15 @@
+name: firefox-bookmarks
+version: 1.0.0
+description: >
+  Read, search and analyze your Firefox bookmarks via Firefox Sync (cloud)
+  or a local Firefox profile. Cache-first design: sync pulls the collection
+  into a local SQLite cache, then search/tree/analyze/dead-link tools work
+  instantly offline. Read-only by design.
+author: daniele
+provides_tools:
+  - firefox_bookmarks_sync
+  - firefox_bookmarks_search
+  - firefox_bookmarks_tree
+  - firefox_bookmarks_analyze
+  - firefox_bookmarks_recheck
+requires_env: []
