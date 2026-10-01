@@ -36,7 +36,10 @@ description: >
   may appear.
 
 ## Setup (one-time)
-If a tool returns `NOT_CONFIGURED`, the user must run the one-time setup in
-the CLI session (interactive login with email + password, TOTP code if 2FA).
-Instruct them: run `/bookmarks-setup` (or the equivalent CLI command) — do
-NOT ask for their password in chat.
+If a tool returns `NOT_CONFIGURED`, credentials are missing. Two paths:
+- Docker/headless: `FFB_EMAIL` + `FFB_PASSWORD` env vars (set by the owner
+  in `.env`) — the first sync logs in automatically.
+- Interactive: the user runs `python -m ffsync.probe setup` in a terminal.
+Never ask for the PASSWORD in chat. If a tool returns `TOTP_REQUIRED`, DO
+ask the user in chat for the current 6-digit code and retry the sync with
+`totp_code` — it expires in ~30 s and is never stored.

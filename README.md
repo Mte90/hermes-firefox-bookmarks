@@ -2,17 +2,12 @@
 
 Plugin for [Hermes Agent](https://hermes-agent.nousresearch.com) that reads, searches and analyzes your **Firefox bookmarks** — from the **Firefox Sync** cloud (Sync 1.5, end-to-end encrypted) or from a local profile (`places.sqlite`), with no Firefox installed on the machine. **v1 is read-only**: it never modifies bookmarks on the server.
 
-```
-Hermes Agent ──(tool / skill / commands)── firefox-bookmarks
-                                            │
-                        ┌───────────────────┴──────────────┐
-                        │ SQLite + FTS5 cache (local)      │  ← cache-first:
-                        └───────────────────┬──────────────┘    every query is offline
-                            sync on-demand  │
-                   ┌────────────────────────┴─────────────────┐
-                   │ Firefox Sync 1.5 (FxA + HAWK)            │
-                   │ or places.sqlite (local mode)            │
-                   └──────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    HA["Hermes Agent"] -->|tool / skill / commands| FB["firefox-bookmarks"]
+    FB -->|cache-first: every query is offline| CACHE[("SQLite + FTS5 cache<br/>(local)")]
+    CACHE -->|sync on-demand| SRC
+    SRC{{"Firefox Sync 1.5 (FxA + HAWK)<br/>or places.sqlite (local mode)"}}
 ```
 
 ## Features
@@ -48,6 +43,8 @@ The plugin requires **0 privileged capabilities** and **does not override built-
 
 ## First-time setup
 
+> Running Hermes in Docker or headless? Skip this section — see [Running inside Docker](#running-inside-docker): email + password come from env vars.
+
 Credentials **never pass through Telegram/LLM** (the password is used only in the FxA login; the refresh token stays on disk with `600` permissions).
 
 **Plan A — Firefox Sync (requires a Firefox Account with Sync active):**
@@ -63,6 +60,59 @@ python -m ffsync.probe status         # credentials + cache status
 
 ```bash
 python -m ffsync.probe local ~/.mozilla/firefox/<profile>/  # or a path to places.sqlite
+```
+
+## Running inside Docker
+
+Headless deployment: **sync mode only**, no Firefox profile inside the container, no interactive setup. The Firefox Account email and password come from environment variables and are used exactly once — afterwards the saved refresh token on the volume is enough. If the account has 2FA enabled, Hermes asks you for the current code in chat during the first sync.
+
+### Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `FFB_EMAIL` | yes | Firefox Account email |
+| `FFB_PASSWORD` | yes | Account password — used for the one-time login, never stored |
+
+`HERMES_HOME` (or `FFB_HOME`) still controls where `plugin-data/` lives. Leave `FFB_MODE` unset — `sync` is the default.
+
+### docker-compose.yml
+
+```yaml
+services:
+  hermes:
+    image: your-hermes-image
+    env_file: .env
+    environment:
+      HERMES_HOME: /data/hermes
+    volumes:
+      - hermes-data:/data/hermes
+      - ./firefox-bookmarks:/data/hermes/plugins/firefox-bookmarks:ro
+volumes:
+  hermes-data:
+```
+
+`.env` (never commit it; `chmod 600`):
+
+```
+FFB_EMAIL=you@example.com
+FFB_PASSWORD=your-password
+```
+
+The container needs egress to `accounts.firefox.com` and the Firefox Sync storage host.
+
+### How the bootstrap works
+
+1. First `/bookmarks-sync` (or `firefox_bookmarks_sync`): no `creds.json` yet → the plugin logs in with `FFB_EMAIL`/`FFB_PASSWORD`, saves `refreshToken` + key material to `/data/hermes/plugin-data/firefox-bookmarks/creds.json` (`0600`), then syncs.
+2. With 2FA enabled the first sync returns `TOTP_REQUIRED` — **Hermes asks you in chat for the current OTP code** and retries with it (`totp_code` argument). The code expires in ~30 s and is never stored, and it is never asked for again.
+3. Later syncs reuse `creds.json`; the volume makes it survive restarts and re-creates. The TOTP is never asked for again.
+4. Once logged in, drop `FFB_EMAIL`/`FFB_PASSWORD` from `.env` — a saved `creds.json` always wins over the env vars. To force a re-login, delete `creds.json` from the volume and set the env vars again.
+
+The password is used only for the FxA login: never written to disk, never logged, never sent through chat/LLM.
+
+### Verify
+
+```bash
+docker compose exec hermes python -m ffsync.probe status
 ```
 
 ## Usage
@@ -125,7 +175,7 @@ python -m pytest tests -q      # 13 offline tests (crypto, HAWK, parser, cache, 
 
 - **Read-only v1**: no writes toward the Sync server.
 - The password is never stored: only `refreshToken` + `keyFetchToken` (on disk, `600`).
-- Credentials never transit through logs, tool responses, or scheduled jobs.
+- Credentials never transit through logs, tool responses, or scheduled jobs — the only exception is the one-time TOTP code (a tool argument, valid ~30 s, never persisted).
 - Link-check: never automatic; requires an explicit request (see the skill).
 - Data: bookmarks stay end-to-end encrypted on Firefox Sync; the local cache is in plaintext on disk — if you share the machine, protect the `plugin-data/` folder.
 
@@ -133,10 +183,3 @@ python -m pytest tests -q      # 13 offline tests (crypto, HAWK, parser, cache, 
 
 MIT — see [LICENSE](LICENSE).
 
-## Status and next steps (after v1)
-
-- [ ] Incremental sync (only recent BSOs via `modifiedAfter`)
-- [ ] Fix for old keys ("oldsync" 2012–2017 keys)
-- [ ] Thematic categorization with LLM (batches, results cached)
-- [ ] Scheduled link-check + weekly report
-- [ ] Port to an MCP server for other agents

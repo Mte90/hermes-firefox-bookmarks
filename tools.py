@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import json
 import time
+from typing import TYPE_CHECKING
 from tools.registry import tool_error, tool_result
 
 from .cache import BookmarksCache
+
+if TYPE_CHECKING:
+    from .ffsync.auth import CredentialBundle
 
 
 # --- schemas ----------------------------------------------------------------
@@ -36,8 +40,12 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "firefox_bookmarks_sync",
         "Sync the user's Firefox bookmarks (cloud Firefox Sync, or local profile) into the local cache. "
         "Run this before search/analyze when the cache is empty or stale, or when the user asks to refresh. "
-        "If not configured yet, returns NOT_CONFIGURED with a setup hint (run /bookmarks-setup in CLI).",
-        {"force": _B("Re-download the full collection even if the server timestamp is unchanged. Default false.")},
+        "If not configured yet, returns NOT_CONFIGURED (interactive probe setup, or FFB_EMAIL/FFB_PASSWORD env vars).",
+        {
+            "force": _B("Re-download the full collection even if the server timestamp is unchanged. Default false."),
+            "totp_code": _S("Current 6-digit TOTP code, only for the first login when 2FA is enabled: "
+                            "ask the user for the live code and retry. Never stored."),
+        },
     ),
     "firefox_bookmarks_search": _s(
         "firefox_bookmarks_search",
@@ -113,10 +121,33 @@ def _mode_env() -> str:
     return m if m in ("sync", "local") else "sync"
 
 
+def _env_login(totp_code: str | None = None) -> CredentialBundle | None:
+    """Headless login from env vars (FFB_EMAIL, FFB_PASSWORD).
+
+    The TOTP code comes from the tool argument (agent asks the user in chat);
+    it is used once, never stored. Returns None if email/password are not
+    set; FxAError propagates.
+    """
+    import os
+    from .ffsync.auth import FxAAuth, save_credentials, creds_path
+
+    email = (os.environ.get("FFB_EMAIL") or "").strip()
+    password = (os.environ.get("FFB_PASSWORD") or "").strip()
+    totp = (totp_code or "").strip() or None
+
+    if not email or not password:
+        return None
+
+    creds = FxAAuth().login(email, password, totp_code=totp)
+    save_credentials(creds, creds_path())
+    return creds
+
+
 # --- handlers -----------------------------------------------------------------
 
 def handle_sync(args: dict, **kw) -> str:
     force = bool(args.get("force"))
+    totp_code = str(args.get("totp_code") or "").strip() or None
     mode = _mode_env()
     cache = _cache(kw)
     stats = cache.stats()
@@ -139,9 +170,11 @@ def handle_sync(args: dict, **kw) -> str:
             path = creds_path()
             creds = load_credentials(path)
             if creds is None:
-                return tool_error("NOT_CONFIGURED: no Firefox Sync credentials. Run /bookmarks-setup in the "
-                                  "CLI session to log in (email + password, TOTP code if 2FA is enabled).")
-            auth = FxAAuth()
+                creds = _env_login(totp_code)
+            if creds is None:
+                return tool_error("NOT_CONFIGURED: no Firefox Sync credentials. Use interactive setup "
+                                  "`python -m ffsync.probe setup` OR set env vars FFB_EMAIL/FFB_PASSWORD "
+                                  "for headless/Docker deployments.")
             try:
                 session = acquire_storage_session(creds)
             except Exception:
@@ -164,9 +197,12 @@ def handle_sync(args: dict, **kw) -> str:
         if "NOT_CONFIGURED" in code:
             return tool_error(msg)
         if code == "TOTP_REQUIRED":
-            return tool_error("SETUP_REQUIRED: Firefox Account requires TOTP 2FA. Run /bookmarks-setup in the CLI session.")
+            return tool_error("TOTP_REQUIRED: Firefox Account requires 2FA. Ask the user for the current "
+                              "6-digit code and retry firefox_bookmarks_sync with totp_code. "
+                              "The code is used once and never stored.")
         if code in ("AUTH_EXPIRED",):
-            return tool_error("AUTH_EXPIRED: saved Firefox Sync session expired. Re-run /bookmarks-setup in the CLI session with your password.")
+            return tool_error("AUTH_EXPIRED: saved Firefox Sync session expired. Log in again "
+                              "(python -m ffsync.probe setup, or FFB_EMAIL/FFB_PASSWORD env vars).")
         return tool_error(f"SYNC_FAILED ({code}): {msg}")
 
 
